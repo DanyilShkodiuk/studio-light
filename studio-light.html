@@ -93,7 +93,8 @@
   #fab.left{right:auto;left:14px}
   body.panel-hidden.active #fab{opacity:.9;pointer-events:auto}
   #toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:rgba(0,0,0,.75);color:#fff;
-    padding:8px 14px;border-radius:999px;font-size:13px;opacity:0;transition:opacity .3s;pointer-events:none;z-index:20;white-space:nowrap}
+    padding:8px 14px;border-radius:18px;font-size:13px;opacity:0;transition:opacity .3s;pointer-events:none;z-index:20;line-height:1.35;
+    max-width:calc(100vw - 120px);text-align:center;width:max-content}
   #toast.show{opacity:1}
 
   @media (max-width:600px){
@@ -756,7 +757,7 @@
     panel.classList.toggle('hidden', hide); document.body.classList.toggle('panel-hidden', hide);
     // інакше стрілки й далі рухали б невидимий повзунок замість яскравості/температури
     if (hide && panel.contains(document.activeElement)) document.activeElement.blur();
-    if (hide) toast('H, подвійний клік або ⚙ — показати налаштування');
+    if (hide) toast(matchMedia('(pointer: coarse)').matches ? 'Подвійний дотик або ⚙ — налаштування' : 'H, подвійний клік або ⚙ — показати налаштування');
   }
   function applySide(){ panel.classList.toggle('left', prefs.side==='left'); $('fab').classList.toggle('left', prefs.side==='left'); placeCam(); }
   $('sideBtn').onclick = () => { prefs.side = prefs.side==='right' ? 'left' : 'right'; save(LS_PREFS, prefs); applySide(); render(); };
@@ -780,7 +781,16 @@
   $('helpBtn').onclick = () => toggleHelp(true);
   $('helpClose').onclick = () => toggleHelp(false);
   $('help').addEventListener('click', e => { if (e.target.id==='help') toggleHelp(false); });
-  stage.addEventListener('dblclick', () => togglePanel());
+  // Подвійний дотик розпізнаємо самі: iOS Safari не завжди надсилає dblclick для пальця
+  let lastTap = null, tapToggledAt = 0;
+  stage.addEventListener('dblclick', () => { if (performance.now() - tapToggledAt > 600) togglePanel(); });
+  stage.addEventListener('pointerup', e => {
+    if (e.pointerType !== 'touch') return;
+    const now = performance.now(), moved = drag && drag.moved;
+    if (!moved && lastTap && now - lastTap.t < 350 && Math.hypot(e.clientX-lastTap.x, e.clientY-lastTap.y) < 40){
+      lastTap = null; tapToggledAt = now; togglePanel();
+    } else lastTap = moved ? null : {t:now, x:e.clientX, y:e.clientY};
+  });
   // кнопки не тримають фокус, щоб пробіл і стрілки завжди керували світлом
   document.addEventListener('click', e => { const b = e.target.closest('button'); if (b) b.blur(); });
 
@@ -850,6 +860,8 @@
   });
   stage.addEventListener('pointermove', e => {
     if (!drag) return;
+    if (!drag.moved && Math.hypot(e.clientX-drag.x, e.clientY-drag.y) < 6) return; // дрібне тремтіння пальця — не рух
+    drag.moved = true;
     let dx = (e.clientX-drag.x)/innerWidth*100, dy = (e.clientY-drag.y)/innerHeight*100;
     if (state.mode==='keyfill') dx = dx * 2 * (drag.x < innerWidth/2 ? -1 : 1); // від центру — ширше
     else if (state.mirror && state.mode!=='split') dx = -dx;
