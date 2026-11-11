@@ -263,7 +263,7 @@
     </section>
   </div>
   <footer>
-    <span><kbd>H</kbd> сховати · <kbd>Пробіл</kbd> вимк/увімк</span>
+    <span id="footInfo"><kbd>H</kbd> сховати · <kbd>Пробіл</kbd> вимк/увімк</span>
     <button class="sec" id="helpBtn">? Клавіші</button>
   </footer>
 </aside>
@@ -592,6 +592,9 @@
       info = `Контраст світло/фон: ${isFinite(r)?(r<10?r.toFixed(1):Math.round(r))+' : 1':'максимальний (фон чорний)'}. Менше фону — драматичніше, більше — м'якші тіні.`;
     }
     $('contrastInfo').textContent = info;
+    // світло вимкнене пробілом — нагадуємо в панелі, щоб чорний екран не здавався поломкою
+    $('footInfo').innerHTML = lightOn ? '<kbd>H</kbd> сховати · <kbd>Пробіл</kbd> вимк/увімк'
+      : '<b style="color:var(--accent)">Світло вимкнено</b> · <kbd>Пробіл</kbd> увімкнути';
     $('sideBtn').title = prefs.side==='right' ? 'Перенести панель ліворуч' : 'Перенести панель праворуч';
   }
 
@@ -624,8 +627,10 @@
   }
   // перейти одразу в кінцевий стан переходу (для збереження сцени та скасування)
   function finishTween(){ if (tweenId){ cancelAnimationFrame(tweenId); tweenId = 0; state = {...tweenTarget}; draw(); } }
+  const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)');
   function animateTo(target, ms=450){
     stopTween();
+    if (reduceMotion.matches){ state = {...target}; render(); return; }
     const from = {...state}, t0 = performance.now();
     tweenTarget = target;
     // нечислові параметри змінюємо одразу; температуру ведемо в майредах (1e6/K),
