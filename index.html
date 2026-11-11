@@ -1,0 +1,772 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Студійне світло</title>
+<style>
+  :root{
+    --panel-bg: rgba(18,18,20,.92);
+    --panel-fg: #eee;
+    --muted: #9a9aa2;
+    --line: rgba(255,255,255,.1);
+    --accent: #ffcf6e;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;overflow:hidden;background:#000;font:14px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:var(--panel-fg)}
+  #stage{position:fixed;inset:0;overflow:hidden;touch-action:none}
+  #stage.movable{cursor:grab}
+  #stage.dragging{cursor:grabbing}
+  #stage.cursor-hidden{cursor:none}
+  #lw{position:absolute;left:0;top:0;transform-origin:0 0;overflow:hidden;pointer-events:none}
+  #light,#light2{position:absolute;pointer-events:none}
+
+  /* ---------- Панель ---------- */
+  #panel{position:fixed;top:12px;right:12px;bottom:12px;width:340px;max-width:calc(100vw - 24px);
+    background:var(--panel-bg);border:1px solid var(--line);border-radius:14px;
+    display:flex;flex-direction:column;transition:transform .25s,opacity .25s,background-color .2s;z-index:5}
+  #panel.left{right:auto;left:12px}
+  #panel.hidden{transform:translateX(calc(100% + 24px));opacity:0;pointer-events:none}
+  #panel.left.hidden{transform:translateX(calc(-100% - 24px))}
+  /* під час перетягування повзунка панель стає майже прозорою, щоб було видно світло */
+  #panel.peek{background:rgba(18,18,20,.35)}
+  #panel.peek header,#panel.peek footer,#panel.peek .scroll>section:not(.active){opacity:.12;transition:opacity .2s}
+  #panel.peek .scroll>section.active .row:not(.active){opacity:.25}
+  #panel header{padding:12px 12px 10px 16px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:6px}
+  #panel header h1{font-size:16px;margin:0;flex:1;white-space:nowrap}
+  #panel .scroll{overflow:auto;padding:6px 16px 16px;flex:1}
+  #panel footer{padding:10px 16px;border-top:1px solid var(--line);color:var(--muted);font-size:12px;display:flex;gap:8px;align-items:center}
+  #panel footer span{flex:1}
+  section{padding:10px 0;border-bottom:1px solid var(--line)}
+  section:last-child{border-bottom:0}
+  h2{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:4px 0 8px;font-weight:600}
+  .row{margin:8px 0}
+  .row label{display:flex;justify-content:space-between;font-size:13px;margin-bottom:3px}
+  .row label span.v{color:var(--accent);font-variant-numeric:tabular-nums}
+  input[type=range]{width:100%;accent-color:var(--accent);cursor:pointer}
+  .chips{display:flex;flex-wrap:wrap;gap:6px}
+  .chip{border:1px solid var(--line);background:rgba(255,255,255,.05);color:var(--panel-fg);
+    border-radius:999px;padding:5px 10px;font-size:12px;cursor:pointer;display:inline-flex;align-items:center;gap:6px}
+  .chip:hover{background:rgba(255,255,255,.12)}
+  .chip.on{border-color:var(--accent);background:rgba(255,207,110,.15)}
+  .chip i{width:12px;height:12px;border-radius:50%;display:inline-block;border:1px solid rgba(255,255,255,.3)}
+  .chip .x{opacity:.5;margin-left:2px}
+  .chip .x:hover{opacity:1}
+  button.main{width:100%;padding:11px;border-radius:10px;border:0;background:var(--accent);color:#222;font-weight:700;font-size:14px;cursor:pointer}
+  button.sec{padding:7px 10px;border-radius:8px;border:1px solid var(--line);background:rgba(255,255,255,.06);color:var(--panel-fg);cursor:pointer;font-size:12px}
+  button.sec:hover{background:rgba(255,255,255,.14)}
+  button.sec.on{border-color:var(--accent);color:var(--accent)}
+  .flex{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  input[type=text]{flex:1;min-width:0;padding:7px 9px;border-radius:8px;border:1px solid var(--line);background:rgba(0,0,0,.3);color:var(--panel-fg)}
+  input[type=color]{width:38px;height:30px;border:0;background:none;padding:0;cursor:pointer}
+  kbd{background:rgba(255,255,255,.12);border-radius:4px;padding:0 5px;font-size:11px;font-family:inherit}
+  .swatch{height:26px;border-radius:8px;border:1px solid var(--line);margin-top:6px}
+  .hint{color:var(--muted);font-size:12px}
+
+  /* ---------- Старт / довідка ---------- */
+  .overlay{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;z-index:10;background:rgba(0,0,0,.55);padding:16px}
+  .overlay.gone{display:none}
+  .card{background:#16161a;border:1px solid var(--line);border-radius:16px;padding:26px;max-width:460px;width:100%;max-height:100%;overflow:auto}
+  .card h1{margin:0 0 6px;font-size:22px}
+  .card p{color:var(--muted);margin:0 0 16px}
+  .card ol{padding-left:20px;margin:0 0 18px;color:#ccc}
+  .card ol li{margin:4px 0}
+  #help table{width:100%;border-collapse:collapse;font-size:13px;margin-bottom:16px}
+  #help td{padding:5px 0;border-bottom:1px solid var(--line);vertical-align:top}
+  #help td:first-child{white-space:nowrap;padding-right:14px;color:var(--accent)}
+
+  /* ---------- Камера ---------- */
+  #cam{position:fixed;bottom:12px;left:12px;width:260px;background:#111;border:1px solid var(--line);border-radius:12px;overflow:hidden;z-index:6}
+  #cam.right{left:auto;right:12px}
+  #cam.gone{display:none}
+  #cam video{width:100%;display:block;transform:scaleX(-1);background:#000;aspect-ratio:4/3;object-fit:cover}
+  #cam .meter{padding:8px 10px;font-size:12px}
+  #cam .bar{height:6px;border-radius:3px;background:#333;position:relative;margin:4px 0 6px;overflow:hidden}
+  #cam .bar b{position:absolute;left:0;top:0;bottom:0;background:var(--accent);transition:width .2s}
+  #cam .bar::after{content:"";position:absolute;left:45%;width:25%;top:0;bottom:0;border-left:1px solid #6c6;border-right:1px solid #6c6}
+  #cam .close{position:absolute;top:6px;right:6px;padding:2px 7px}
+  #cam .guide{position:absolute;left:25%;top:12%;width:50%;height:66%;border:1px dashed rgba(255,255,255,.4);border-radius:45%;pointer-events:none}
+
+  #toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:rgba(0,0,0,.75);color:#fff;
+    padding:8px 14px;border-radius:999px;font-size:13px;opacity:0;transition:opacity .3s;pointer-events:none;z-index:20;white-space:nowrap}
+  #toast.show{opacity:1}
+
+  @media (max-width:600px){
+    #panel{top:auto;left:8px;right:8px;bottom:8px;width:auto;max-width:none;height:55vh}
+    #panel.left{left:8px}
+    #panel.hidden,#panel.left.hidden{transform:translateY(calc(100% + 16px))}
+    #cam{width:160px;top:8px;bottom:auto}
+  }
+</style>
+</head>
+<body>
+<div id="stage"><div id="lw"><div id="light"></div><div id="light2"></div></div></div>
+
+<div id="start" class="overlay">
+  <div class="card">
+    <h1>💡 Студійне світло</h1>
+    <p>Монітор як м'яке джерело світла для обличчя.</p>
+    <ol>
+      <li>Виставте яскравість самого монітора на максимум.</li>
+      <li>Натисніть кнопку нижче, і екран стане світлом.</li>
+    </ol>
+    <button class="main" id="goBtn">Увімкнути світло</button>
+    <p style="margin:14px 0 0;font-size:12px"><kbd>H</kbd> налаштування · <kbd>F</kbd> повний екран · <kbd>Пробіл</kbd> вимк/увімк · <kbd>?</kbd> усі клавіші</p>
+  </div>
+</div>
+
+<div id="help" class="overlay gone">
+  <div class="card">
+    <h1>Керування</h1>
+    <table>
+      <tr><td><kbd>H</kbd> або подвійний клік</td><td>Показати або сховати панель</td></tr>
+      <tr><td><kbd>F</kbd></td><td>Повний екран</td></tr>
+      <tr><td><kbd>Пробіл</kbd></td><td>Вимкнути / увімкнути світло</td></tr>
+      <tr><td><kbd>C</kbd></td><td>Камера з індикатором освітленості</td></tr>
+      <tr><td><kbd>1</kbd>–<kbd>9</kbd></td><td>Сцени</td></tr>
+      <tr><td><kbd>↑</kbd> <kbd>↓</kbd></td><td>Яскравість</td></tr>
+      <tr><td><kbd>←</kbd> <kbd>→</kbd></td><td>Температура кольору</td></tr>
+      <tr><td><kbd>[</kbd> <kbd>]</kbd></td><td>М'якість</td></tr>
+      <tr><td><kbd>-</kbd> <kbd>=</kbd></td><td>Розмір джерела</td></tr>
+      <tr><td><kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd></td><td>Скасувати / повторити</td></tr>
+      <tr><td>Перетягнути мишкою</td><td>Рухати джерело світла по екрану</td></tr>
+      <tr><td>Коліщатко</td><td>Яскравість</td></tr>
+      <tr><td><kbd>Ctrl</kbd> + коліщатко</td><td>Розмір</td></tr>
+      <tr><td><kbd>Shift</kbd> + коліщатко</td><td>М'якість</td></tr>
+      <tr><td><kbd>Alt</kbd> + коліщатко</td><td>Температура</td></tr>
+    </table>
+    <p style="margin:0 0 14px">Порада: свічення самої панелі теж падає на обличчя, тому під час зйомки ховайте її клавішею <kbd>H</kbd>.</p>
+    <button class="main" id="helpClose">Зрозуміло</button>
+  </div>
+</div>
+
+<aside id="panel">
+  <header>
+    <h1>💡 Студійне світло</h1>
+    <button class="sec" id="camBtn" title="Камера (C)">📷</button>
+    <button class="sec" id="sideBtn" title="Перенести панель на інший бік">⇆</button>
+    <button class="sec" id="fsBtn" title="Повний екран (F)">⛶</button>
+    <button class="sec" id="hideBtn" title="Сховати панель (H)">✕</button>
+  </header>
+  <div class="scroll">
+
+    <section>
+      <h2>Сцени</h2>
+      <div class="chips" id="scenes"></div>
+      <div class="flex" style="margin-top:10px">
+        <input type="text" id="presetName" placeholder="Назва моєї сцени">
+        <button class="sec" id="savePreset">Зберегти</button>
+      </div>
+    </section>
+
+    <section>
+      <h2>Форма світла</h2>
+      <div class="chips" id="modes"></div>
+      <div class="hint" id="modeHint" style="margin-top:8px"></div>
+    </section>
+
+    <section>
+      <h2>Колір</h2>
+      <div class="chips" id="colorPresets"></div>
+      <div class="row" id="rowTemp">
+        <label>Температура <span class="v" id="vTemp"></span></label>
+        <input type="range" id="temp" min="2000" max="10000" step="50">
+      </div>
+      <div class="row" id="rowTint">
+        <label>Відтінок (зелений ↔ пурпурний) <span class="v" id="vTint"></span></label>
+        <input type="range" id="tint" min="-100" max="100" step="1">
+      </div>
+      <div class="row flex">
+        <label style="flex:1;margin:0"><span><input type="checkbox" id="useCustom"> Свій колір (RGB)</span></label>
+        <input type="color" id="custom">
+      </div>
+      <div class="row flex" id="rowColor2">
+        <label style="flex:1;margin:0"><span>Другий колір</span></label>
+        <input type="color" id="color2">
+      </div>
+      <div class="swatch" id="swatch"></div>
+    </section>
+
+    <section>
+      <h2>Інтенсивність</h2>
+      <div class="row">
+        <label>Яскравість <span class="v" id="vBright"></span></label>
+        <input type="range" id="bright" min="0" max="100" step="1">
+      </div>
+      <div class="row" id="rowFill">
+        <label>Заповнююче джерело <span class="v" id="vFill"></span></label>
+        <input type="range" id="fill" min="0" max="100" step="1">
+      </div>
+      <div class="row" id="rowAmbient">
+        <label>Фон <span class="v" id="vAmbient"></span></label>
+        <input type="range" id="ambient" min="0" max="100" step="1">
+      </div>
+      <div class="hint" id="contrastInfo"></div>
+    </section>
+
+    <section id="secShape">
+      <h2>Характер світла</h2>
+      <div class="row" id="rowSoft">
+        <label>М'якість (різке ↔ ніжне) <span class="v" id="vSoft"></span></label>
+        <input type="range" id="soft" min="0" max="100" step="1">
+      </div>
+      <div class="row" id="rowSize">
+        <label>Розмір джерела <span class="v" id="vSize"></span></label>
+        <input type="range" id="size" min="10" max="100" step="1">
+      </div>
+      <div class="row" id="rowAspect">
+        <label>Пропорції (вузьке ↔ широке) <span class="v" id="vAspect"></span></label>
+        <input type="range" id="aspect" min="20" max="250" step="1">
+      </div>
+      <div class="row" id="rowThick">
+        <label id="lblThick">Товщина <span class="v" id="vThick"></span></label>
+        <input type="range" id="thick" min="2" max="40" step="1">
+      </div>
+      <div class="row" id="rowRound">
+        <label>Заокруглення кутів <span class="v" id="vRound"></span></label>
+        <input type="range" id="round" min="0" max="50" step="1">
+      </div>
+    </section>
+
+    <section id="secPos">
+      <h2>Положення</h2>
+      <div class="row" id="rowPx">
+        <label id="lblPx">Горизонтально (ліво ↔ право) <span class="v" id="vPx"></span></label>
+        <input type="range" id="px" min="0" max="100" step="1">
+      </div>
+      <div class="row" id="rowPy">
+        <label>Вертикально (верх ↔ низ) <span class="v" id="vPy"></span></label>
+        <input type="range" id="py" min="0" max="100" step="1">
+      </div>
+      <div class="hint" id="dragHint">Джерело також можна перетягувати мишкою прямо на екрані.</div>
+    </section>
+
+    <section>
+      <h2>Інше</h2>
+      <div class="row"><label><span><input type="checkbox" id="mirror"> Дзеркально (поміняти ліво/право)</span></label></div>
+      <div class="flex" style="margin-top:8px">
+        <button class="sec" id="undoBtn" title="Ctrl+Z">↶ Скасувати</button>
+        <button class="sec" id="redoBtn" title="Ctrl+Shift+Z">↷ Повторити</button>
+        <button class="sec" id="resetBtn">Скинути</button>
+      </div>
+      <div class="flex" style="margin-top:8px">
+        <button class="sec" id="exportBtn">Експорт сцен</button>
+        <button class="sec" id="importBtn">Імпорт</button>
+        <input type="file" id="importFile" accept="application/json,.json" style="display:none">
+      </div>
+    </section>
+  </div>
+  <footer>
+    <span><kbd>H</kbd> сховати · <kbd>Пробіл</kbd> вимк/увімк</span>
+    <button class="sec" id="helpBtn">? Клавіші</button>
+  </footer>
+</aside>
+
+<div id="cam" class="gone">
+  <video id="camVideo" autoplay playsinline muted></video>
+  <div class="guide"></div>
+  <button class="sec close" id="camClose" title="Закрити камеру">✕</button>
+  <div class="meter">
+    <div>Освітленість обличчя: <b id="camLevel">…</b></div>
+    <div class="bar"><b id="camBar" style="width:0"></b></div>
+    <div class="hint" id="camAdvice"></div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+(() => {
+  // ================= Дані =================
+  const MODES = [
+    {id:'full',    name:'Весь екран',       hint:'Максимум світла. Найбільше джерело, тіні найм\'якші.'},
+    {id:'softbox', name:'Софтбокс',         hint:'Класичне м\'яке студійне світло. Чим більший розмір і м\'якість, тим ніжніші тіні.'},
+    {id:'window',  name:'Вікно',            hint:'Імітує світло з вікна з рамою. Дає природні відблиски в очах.'},
+    {id:'ring',    name:'Кільцева лампа',   hint:'Рівне світло без тіней і кругові відблиски в очах. Ставте по центру навпроти обличчя.'},
+    {id:'keyfill', name:'Ключ + заповнення',hint:'Два джерела: яскраве з одного боку і слабше з іншого. Співвідношення задає «Заповнююче джерело».'},
+    {id:'strips',  name:'Дві смуги',        hint:'Контурне світло з боків. Добре підкреслює форму обличчя.'},
+    {id:'key',     name:'Бічне',            hint:'Драматичне світло з одного боку. Бік обирається повзунком «Горизонтально».'},
+    {id:'top',     name:'Зверху',           hint:'Світло падає згори, як від стельового софтбокса.'},
+    {id:'split',   name:'Двоколірне',       hint:'Дві половини екрана різних кольорів. Для креативних кадрів.'},
+  ];
+  const COLOR_PRESETS = [
+    {name:'Свічка 2000K',   temp:2000},
+    {name:'Лампа 3200K',    temp:3200},
+    {name:'Нейтр. 4300K',   temp:4300},
+    {name:'Денне 5600K',    temp:5600},
+    {name:'Хмарно 6500K',   temp:6500},
+    {name:'Холодне 8000K',  temp:8000},
+    {name:'Рожеве',     custom:'#ff8fb8'},
+    {name:'Персик',     custom:'#ffb38a'},
+    {name:'Бірюза',     custom:'#5fe0d6'},
+    {name:'Неон-синій', custom:'#4d6bff'},
+    {name:'Фіолет',     custom:'#b06bff'},
+    {name:'Червоний',   custom:'#ff3b3b'},
+  ];
+  const DEFAULT = {mode:'softbox', temp:5600, tint:0, useCustom:false, custom:'#ffffff', color2:'#4d6bff',
+    bright:100, fill:35, ambient:8, soft:45, size:70, aspect:100, thick:10, round:20, px:50, py:45, mirror:false};
+  const BUILTIN_SCENES = [
+    {name:'Відеодзвінок', s:{mode:'softbox', temp:5000, soft:65, size:80, ambient:15, py:40}},
+    {name:'Б\'юті-кільце', s:{mode:'ring', temp:5600, soft:20, size:70, thick:12, ambient:5}},
+    {name:'Максимум',     s:{mode:'full', temp:5600, ambient:100}},
+    {name:'Портрет',      s:{mode:'keyfill', temp:5200, soft:55, size:80, aspect:70, fill:30, ambient:4, py:42}},
+    {name:'Вікно',        s:{mode:'window', temp:5800, soft:35, size:85, aspect:110, thick:6, round:4, ambient:6, px:50, py:42}},
+    {name:'Драма збоку',  s:{mode:'key', temp:4500, soft:35, size:45, px:0, ambient:0}},
+    {name:'Теплий вечір', s:{mode:'softbox', temp:2800, soft:80, size:65, ambient:20}},
+    {name:'Неон-дует',    s:{mode:'split', useCustom:true, custom:'#ff4fa3', color2:'#3ad7ff', soft:40, px:50}},
+  ].map(sc => ({...sc, s:{...DEFAULT, ...sc.s}}));
+  const NUM_KEYS = ['temp','tint','bright','fill','ambient','soft','size','aspect','thick','round','px','py'];
+  const LS_STATE = 'studioLight.state', LS_SCENES = 'studioLight.scenes', LS_PREFS = 'studioLight.prefs';
+  const load = (k, d) => { try { const v = JSON.parse(localStorage.getItem(k)); return v ?? d; } catch { return d; } };
+  const save = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
+
+  const clamp = (v,a,b) => Math.max(a,Math.min(b,v));
+  function sanitize(s){
+    const o = {...DEFAULT};
+    if (s && typeof s === 'object') for (const k in DEFAULT){
+      if (!(k in s)) continue;
+      if (typeof DEFAULT[k] === 'number' && isFinite(+s[k])) o[k] = +s[k];
+      else if (typeof DEFAULT[k] === 'boolean') o[k] = !!s[k];
+      else if (k==='mode' && MODES.some(m=>m.id===s[k])) o[k] = s[k];
+      else if ((k==='custom'||k==='color2') && /^#[0-9a-f]{6}$/i.test(s[k])) o[k] = s[k];
+    }
+    return o;
+  }
+
+  let state = sanitize(load(LS_STATE, {}));
+  let userScenes = load(LS_SCENES, []).filter(sc => sc && typeof sc.name==='string').map(sc => ({name:sc.name, s:sanitize(sc.s)}));
+  let prefs = {side:'right', ...load(LS_PREFS, {})};
+  let lightOn = true;
+
+  const $ = id => document.getElementById(id);
+  const stage = $('stage'), light = $('light'), light2 = $('light2'), panel = $('panel');
+
+  // ================= Колір =================
+  function kelvinToRgb(k){
+    const t = k/100; let r,g,b;
+    r = t<=66 ? 255 : 329.698727446*Math.pow(t-60,-0.1332047592);
+    g = t<=66 ? 99.4708025861*Math.log(t)-161.1195681661 : 288.1221695283*Math.pow(t-60,-0.0755148492);
+    b = t>=66 ? 255 : (t<=19 ? 0 : 138.5177312231*Math.log(t-10)-305.0447927307);
+    return [r,g,b].map(x => clamp(x,0,255));
+  }
+  function hexToRgb(h){ h=h.replace('#',''); return [0,2,4].map(i=>parseInt(h.substr(i,2),16)); }
+  function sceneColor(s){
+    if (s.useCustom) return hexToRgb(s.custom);
+    let [r,g,b] = kelvinToRgb(s.temp);
+    const t = s.tint/100;
+    if (t > 0) g *= 1 - t*0.25;              // пурпурний: менше зеленого
+    else { r *= 1 + t*0.2; b *= 1 + t*0.2; } // зелений: менше червоного і синього
+    const m = Math.max(r,g,b) || 1;          // найяскравіший канал = 255 (максимум світла)
+    return [r,g,b].map(x => x*255/m);
+  }
+  const rgb = (c, k=1) => `rgb(${c.map(x=>Math.round(x*k)).join(',')})`;
+
+  // ================= Рендер =================
+  // Перемальовуємо не частіше за кадр екрана, щоб перетягування було плавним
+  let rafId = 0, saveT = 0;
+  function render(){ if (!rafId) rafId = requestAnimationFrame(() => { rafId = 0; draw(); }); }
+
+  function draw(){
+    const c = sceneColor(state);
+    const k = lightOn ? state.bright/100 : 0;
+    const main = rgb(c, k);
+    const amb  = rgb(c, k * state.ambient/100);
+    // Розмиття великих елементів дороге: при сильній м'якості малюємо світло в зменшеному
+    // масштабі і розтягуємо. Результат той самий, а працює в рази швидше.
+    const fullBlur = state.soft/100 * Math.min(innerWidth,innerHeight) * 0.18;
+    const q = state.mode==='split' ? 1 : fullBlur > 24 ? 6 : fullBlur > 6 ? 3 : 1;
+    const W = innerWidth/q, H = innerHeight/q, M = Math.min(W,H);
+    const blur = fullBlur/q;
+    const LW = $('lw').style;
+    LW.width = W+'px'; LW.height = H+'px'; LW.transform = q>1 ? `scale(${q})` : 'none';
+    const px = state.mirror ? 100-state.px : state.px;
+    const R = v => v/q;
+    stage.style.backgroundColor = amb;
+
+    const L = light.style, L2 = light2.style;
+    L.cssText = ''; L2.cssText = 'display:none';
+    const filt = blur > 0.5 ? `blur(${blur.toFixed(1)}px)` : 'none';
+    L.filter = filt;
+
+    switch(state.mode){
+      case 'full':
+        stage.style.backgroundColor = main; L.display='none'; break;
+      case 'softbox': case 'window': {
+        const h = state.size/100 * H * 0.95;
+        const w = Math.min(W*1.2, h * state.aspect/100 * (W/H>1?1.3:1));
+        Object.assign(L,{width:w+'px',height:h+'px',left:(px/100*W - w/2)+'px',top:(state.py/100*H - h/2)+'px',
+          backgroundColor:main,borderRadius:(state.round/100*Math.min(w,h))+'px'});
+        if (state.mode==='window'){
+          const bt = state.thick/100 * Math.min(w,h) * 0.5;   // товщина рами
+          const bar = (len) => `linear-gradient(var(--d), transparent ${(len-bt)/2}px, ${amb} ${(len-bt)/2}px, ${amb} ${(len+bt)/2}px, transparent ${(len+bt)/2}px)`;
+          L.backgroundImage = bar(w).replace('var(--d)','90deg') + ',' + bar(h).replace('var(--d)','180deg');
+        }
+        break; }
+      case 'ring': {
+        const d = state.size/100 * M * 0.95, th = state.thick/100 * d * 0.6;
+        Object.assign(L,{width:d+'px',height:d+'px',left:(px/100*W - d/2)+'px',top:(state.py/100*H - d/2)+'px',
+          border:`${th}px solid ${main}`,borderRadius:'50%'});
+        break; }
+      case 'keyfill': {
+        const h = state.size/100 * H * 0.95;
+        const w = Math.min(W*0.48, h * state.aspect/100 * 0.75);
+        const gap = (px/100) * W * 0.5;     // відстань між джерелами від центру
+        const top = (state.py/100*H - h/2)+'px', br = (state.round/100*Math.min(w,h))+'px';
+        const keyLeft = !state.mirror;
+        const xKey = keyLeft ? W/2 - gap - w/2 : W/2 + gap - w/2;
+        const xFill = keyLeft ? W/2 + gap - w/2 : W/2 - gap - w/2;
+        Object.assign(L,{width:w+'px',height:h+'px',left:xKey+'px',top,backgroundColor:main,borderRadius:br});
+        L2.cssText = '';
+        Object.assign(L2,{width:w+'px',height:h+'px',left:xFill+'px',top,backgroundColor:rgb(c, k*state.fill/100),borderRadius:br,filter:filt});
+        break; }
+      case 'strips': {
+        const sw = state.thick/100 * W * 0.9, sh = state.size/100 * H, top = (state.py/100*H - sh/2);
+        Object.assign(L,{left:'0',top:'0',width:W+'px',height:H+'px',
+          background:`linear-gradient(${main},${main}) left 0 top ${top}px / ${sw}px ${sh}px no-repeat,
+                      linear-gradient(${main},${main}) right 0 top ${top}px / ${sw}px ${sh}px no-repeat`});
+        break; }
+      case 'key': {
+        const fromLeft = px < 50;
+        const w = state.size/100 * W, r = R(state.round*4);
+        Object.assign(L,{top:'-10%',height:'120%',width:w+'px',[fromLeft?'left':'right']:(-blur)+'px',
+          backgroundColor:main,borderRadius:fromLeft?`0 ${r}px ${r}px 0`:`${r}px 0 0 ${r}px`});
+        break; }
+      case 'top': {
+        const h = state.size/100 * H * 0.8, w = Math.min(W*1.1, W * state.aspect/100 * 0.8), r = R(state.round*4);
+        Object.assign(L,{top:(-blur)+'px',height:h+'px',width:w+'px',left:(px/100*W - w/2)+'px',
+          backgroundColor:main,borderRadius:`0 0 ${r}px ${r}px`});
+        break; }
+      case 'split': {
+        const c2 = rgb(hexToRgb(state.color2), k);
+        const a = state.mirror ? c2 : main, b = state.mirror ? main : c2;
+        const half = state.soft/2;
+        L.filter = 'none';
+        Object.assign(L,{left:'0',top:'0',width:W+'px',height:H+'px',
+          background:`linear-gradient(90deg, ${a} 0%, ${a} ${clamp(state.px-half,0,100)}%, ${b} ${clamp(state.px+half,0,100)}%, ${b} 100%)`});
+        break; }
+    }
+    updateUI(c);
+    clearTimeout(saveT); saveT = setTimeout(() => { save(LS_STATE, state); commitHistory(); }, 350);
+  }
+
+  // ================= Історія (скасувати / повторити) =================
+  let history = [JSON.stringify(state)], hIdx = 0, restoring = false;
+  function commitHistory(){
+    if (restoring || tweenId) return;
+    const s = JSON.stringify(state);
+    if (s === history[hIdx]) return;
+    history = history.slice(0, hIdx+1); history.push(s);
+    if (history.length > 100) history.shift();
+    hIdx = history.length-1;
+  }
+  function undoRedo(dir){
+    clearTimeout(saveT); commitHistory();
+    const n = hIdx + dir;
+    if (n < 0 || n >= history.length) { toast(dir<0 ? 'Нічого скасовувати' : 'Нічого повторювати'); return; }
+    hIdx = n; restoring = true; state = JSON.parse(history[hIdx]); markScene(null); draw(); restoring = false;
+    toast(dir<0 ? 'Скасовано' : 'Повторено');
+  }
+
+  // ================= UI =================
+  const sliders = {
+    temp:  v => v+'K',
+    tint:  v => (v>0?'+':'')+v,
+    bright:v => v+'%',
+    fill:  v => v+'%',
+    ambient:v=> v+'%',
+    soft:  v => v+'%',
+    size:  v => v+'%',
+    aspect:v => (v/100).toFixed(2)+'×',
+    thick: v => v+'%',
+    round: v => v+'%',
+    px:    v => v+'%',
+    py:    v => v+'%',
+  };
+  const valLbl = id => $('v'+id[0].toUpperCase()+id.slice(1));
+  for (const id in sliders){
+    const el = $(id), lbl = valLbl(id);
+    el.addEventListener('input', () => {
+      stopTween(); state[id] = +el.value; lbl.textContent = sliders[id](state[id]);
+      if (id==='temp'||id==='tint') state.useCustom = false;
+      if (activeScene) markScene(null); render();
+    });
+    // поки повзунок затиснутий, панель стає прозорою, щоб бачити світло
+    el.addEventListener('pointerdown', () => {
+      const row = el.closest('.row'), sec = el.closest('section');
+      row.classList.add('active'); sec.classList.add('active'); panel.classList.add('peek');
+      const up = () => { row.classList.remove('active'); sec.classList.remove('active'); panel.classList.remove('peek'); removeEventListener('pointerup', up); removeEventListener('pointercancel', up); };
+      addEventListener('pointerup', up); addEventListener('pointercancel', up);
+    });
+  }
+  $('useCustom').addEventListener('change', e => { state.useCustom = e.target.checked; markScene(null); render(); });
+  $('custom').addEventListener('input', e => { state.custom = e.target.value; state.useCustom = true; markScene(null); render(); });
+  $('color2').addEventListener('input', e => { state.color2 = e.target.value; markScene(null); render(); });
+  $('mirror').addEventListener('change', e => { state.mirror = e.target.checked; markScene(null); render(); });
+
+  function show(id, on){ const el=$(id); if(el) el.style.display = on ? '' : 'none'; }
+  function updateUI(c){
+    for (const id in sliders){ if (document.activeElement !== $(id)) $(id).value = state[id]; valLbl(id).textContent = sliders[id](state[id]); }
+    $('useCustom').checked = state.useCustom; $('custom').value = state.custom; $('color2').value = state.color2; $('mirror').checked = state.mirror;
+    const m = state.mode;
+    $('swatch').style.background = m==='split' ? `linear-gradient(90deg, ${rgb(c)}, ${state.color2})` : rgb(c);
+    show('rowTemp', !state.useCustom); show('rowTint', !state.useCustom);
+    show('rowColor2', m==='split');
+    show('rowFill', m==='keyfill');
+    show('rowAmbient', m!=='full' && m!=='split');
+    show('secShape', m!=='full');
+    show('rowSize', m!=='full' && m!=='split');
+    show('rowAspect', ['softbox','window','top','keyfill'].includes(m));
+    show('rowThick', ['ring','strips','window'].includes(m));
+    $('lblThick').firstChild.textContent = m==='ring' ? 'Товщина кільця ' : m==='window' ? 'Товщина рами ' : 'Ширина смуг ';
+    show('rowRound', ['softbox','window','key','top','keyfill'].includes(m));
+    show('secPos', m!=='full');
+    show('rowPx', m!=='strips');
+    $('lblPx').firstChild.textContent = m==='keyfill' ? 'Відстань між джерелами ' : m==='split' ? 'Межа кольорів ' : m==='key' ? 'Бік (ліво ↔ право) ' : 'Горизонтально (ліво ↔ право) ';
+    show('rowPy', ['softbox','window','ring','strips','keyfill'].includes(m));
+    show('dragHint', m!=='full');
+    stage.classList.toggle('movable', m!=='full');
+    document.querySelectorAll('#modes .chip').forEach(b => b.classList.toggle('on', b.dataset.id===m));
+    $('modeHint').textContent = (MODES.find(x=>x.id===m)||{}).hint || '';
+    let info;
+    if (m==='full') info = 'Рівномірне світло на весь екран, максимальна потужність.';
+    else if (m==='split') info = 'Обидва кольори світять на повну яскравість.';
+    else if (m==='keyfill') {
+      const r = state.fill>0 ? 100/state.fill : Infinity;
+      info = `Співвідношення ключ/заповнення ${isFinite(r)?r.toFixed(1)+' : 1':'∞'}. Для класичного портрета 2–4 : 1, для драми 8 : 1 і більше.`;
+    } else {
+      const r = state.ambient>0 ? 100/state.ambient : Infinity;
+      info = `Контраст світло/фон: ${isFinite(r)?r.toFixed(1)+' : 1':'максимальний (фон чорний)'}. Менше фону — драматичніше, більше — м'якші тіні.`;
+    }
+    $('contrastInfo').textContent = info;
+    $('sideBtn').title = prefs.side==='right' ? 'Перенести панель ліворуч' : 'Перенести панель праворуч';
+  }
+
+  MODES.forEach(m => {
+    const b = document.createElement('button'); b.className='chip'; b.textContent=m.name; b.dataset.id=m.id; b.title=m.hint;
+    b.onclick = () => { stopTween(); state.mode = m.id; markScene(null); render(); };
+    $('modes').appendChild(b);
+  });
+  COLOR_PRESETS.forEach(p => {
+    const b = document.createElement('button'); b.className='chip';
+    const c = p.custom ? p.custom : rgb(kelvinToRgb(p.temp));
+    b.innerHTML = `<i style="background:${c}"></i>${p.name}`;
+    b.onclick = () => {
+      stopTween();
+      if (p.custom){ state.useCustom = true; state.custom = p.custom; }
+      else { state.useCustom = false; state.temp = p.temp; state.tint = 0; }
+      markScene(null); render();
+    };
+    $('colorPresets').appendChild(b);
+  });
+
+  // ================= Плавний перехід між сценами =================
+  let tweenId = 0;
+  function stopTween(){ if (tweenId){ cancelAnimationFrame(tweenId); tweenId = 0; } }
+  function animateTo(target, ms=450){
+    stopTween();
+    const from = {...state}, t0 = performance.now();
+    // нечислові параметри змінюємо одразу; колір плавно, лише якщо обидва у кельвінах
+    const next = {...target};
+    const step = now => {
+      const p = Math.min(1, (now - t0)/ms), e = p<.5 ? 2*p*p : 1-Math.pow(-2*p+2,2)/2;
+      const s = {...next};
+      for (const k of NUM_KEYS) s[k] = from[k] + (target[k]-from[k])*e;
+      if (from.mode !== target.mode && p < 1) s.mode = target.mode;
+      state = s; draw();
+      if (p < 1) tweenId = requestAnimationFrame(step);
+      else { tweenId = 0; state = {...target}; draw(); }
+    };
+    tweenId = requestAnimationFrame(step);
+  }
+
+  // ================= Сцени =================
+  let activeScene = null;
+  function markScene(name){ activeScene = name; document.querySelectorAll('#scenes .chip').forEach(b=>b.classList.toggle('on', b.dataset.name===name)); }
+  function allScenes(){ return [...BUILTIN_SCENES, ...userScenes]; }
+  function applyScene(sc){ animateTo(sanitize(sc.s)); markScene(sc.name); toast('Сцена: '+sc.name); }
+  function renderScenes(){
+    const box = $('scenes'); box.innerHTML='';
+    allScenes().forEach((sc,i) => {
+      const b = document.createElement('button'); b.className='chip'; b.dataset.name=sc.name;
+      const dot = sc.s.mode==='split' ? `linear-gradient(90deg, ${rgb(sceneColor(sc.s))} 50%, ${sc.s.color2} 50%)` : rgb(sceneColor(sc.s));
+      b.innerHTML = `<i style="background:${dot}"></i>${i<9?`<b style="opacity:.5">${i+1}</b> `:''}${escapeHtml(sc.name)}`;
+      b.onclick = () => applyScene(sc);
+      if (i >= BUILTIN_SCENES.length){
+        const x = document.createElement('span'); x.className='x'; x.textContent='✕'; x.title='Видалити';
+        x.onclick = e => { e.stopPropagation(); if(confirm('Видалити сцену «'+sc.name+'»?')){ userScenes.splice(i-BUILTIN_SCENES.length,1); save(LS_SCENES,userScenes); renderScenes(); } };
+        b.appendChild(x);
+      }
+      box.appendChild(b);
+    });
+    markScene(activeScene);
+  }
+  function escapeHtml(s){ return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+  function savePreset(){
+    const name = $('presetName').value.trim() || 'Моя сцена '+(userScenes.length+1);
+    if (BUILTIN_SCENES.some(s => s.name===name)) { toast('Така назва вже є серед готових сцен'); return; }
+    const idx = userScenes.findIndex(s => s.name===name);
+    const sc = {name, s:{...state}};
+    if (idx>=0) userScenes[idx]=sc; else userScenes.push(sc);
+    save(LS_SCENES, userScenes); $('presetName').value=''; $('presetName').blur(); renderScenes(); markScene(name);
+    toast((idx>=0?'Оновлено: ':'Збережено: ')+name);
+  }
+  $('savePreset').onclick = savePreset;
+  $('presetName').addEventListener('keydown', e => { if (e.key==='Enter') savePreset(); });
+  $('exportBtn').onclick = () => {
+    if (!userScenes.length) { toast('Немає власних сцен для експорту'); return; }
+    const blob = new Blob([JSON.stringify(userScenes,null,2)],{type:'application/json'});
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download='studio-light-scenes.json'; a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  };
+  $('importBtn').onclick = () => $('importFile').click();
+  $('importFile').onchange = async e => {
+    try { const arr = JSON.parse(await e.target.files[0].text());
+      if (!Array.isArray(arr)) throw 0;
+      let n = 0;
+      arr.forEach(sc => { if(sc && typeof sc.name==='string' && sc.s){ const v={name:sc.name, s:sanitize(sc.s)}; const i=userScenes.findIndex(x=>x.name===sc.name); if(i>=0) userScenes[i]=v; else userScenes.push(v); n++; } });
+      save(LS_SCENES,userScenes); renderScenes(); toast('Імпортовано сцен: '+n);
+    } catch { toast('Не вдалося прочитати файл'); }
+    e.target.value='';
+  };
+  $('resetBtn').onclick = () => { animateTo({...DEFAULT}); markScene(null); toast('Скинуто до стандартних (Ctrl+Z — повернути)'); };
+  $('undoBtn').onclick = () => undoRedo(-1);
+  $('redoBtn').onclick = () => undoRedo(1);
+
+  // ================= Камера з індикатором освітленості =================
+  let camStream = null, camTimer = 0;
+  const camCanvas = document.createElement('canvas'); camCanvas.width = 64; camCanvas.height = 48;
+  const camCtx = camCanvas.getContext('2d', {willReadFrequently:true});
+  async function toggleCam(force){
+    const on = force ?? !camStream;
+    if (!on){
+      if (camStream) camStream.getTracks().forEach(t => t.stop());
+      camStream = null; clearInterval(camTimer); $('cam').classList.add('gone'); $('camBtn').classList.remove('on'); return;
+    }
+    if (camStream) return;
+    try {
+      camStream = await navigator.mediaDevices.getUserMedia({video:{width:640,height:480,facingMode:'user'}, audio:false});
+    } catch (err) {
+      toast('Камера недоступна: дозвольте доступ у браузері'); return;
+    }
+    $('camVideo').srcObject = camStream;
+    $('cam').classList.remove('gone'); $('camBtn').classList.add('on');
+    placeCam();
+    camTimer = setInterval(measureCam, 250);
+  }
+  function placeCam(){ $('cam').classList.toggle('right', prefs.side==='left'); }
+  function measureCam(){
+    const v = $('camVideo'); if (!v.videoWidth) return;
+    camCtx.drawImage(v, 0, 0, 64, 48);
+    // беремо центральну зону, де зазвичай обличчя
+    const d = camCtx.getImageData(16, 6, 32, 32).data;
+    let sum=0, clip=0, R=0, B=0, n=d.length/4;
+    for (let i=0;i<d.length;i+=4){
+      const y = 0.2126*d[i] + 0.7152*d[i+1] + 0.0722*d[i+2];
+      sum += y; R += d[i]; B += d[i+2]; if (y > 245) clip++;
+    }
+    const lvl = sum/n/255*100, clipPct = clip/n*100, warm = (R-B)/n;
+    $('camLevel').textContent = Math.round(lvl)+'%';
+    $('camBar').style.width = clamp(lvl,0,100)+'%';
+    let adv;
+    if (clipPct > 8) adv = 'Пересвіт: зменште яскравість або відсуньтесь.';
+    else if (lvl < 30) adv = 'Темно: збільште яскравість чи розмір джерела або сядьте ближче.';
+    else if (lvl > 72) adv = 'Дуже світло: трохи зменште яскравість.';
+    else adv = 'Добре освітлено ✓';
+    if (warm > 45) adv += ' Відтінок теплий.'; else if (warm < -25) adv += ' Відтінок холодний.';
+    $('camAdvice').textContent = adv;
+  }
+  $('camBtn').onclick = () => toggleCam();
+  $('camClose').onclick = () => toggleCam(false);
+
+  // ================= Керування =================
+  let toastT;
+  function toast(msg){ const t=$('toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove('show'),1400); }
+  function togglePanel(force){ const hide = force ?? !panel.classList.contains('hidden'); panel.classList.toggle('hidden', hide); if(hide) toast('H або подвійний клік — показати налаштування'); }
+  function applySide(){ panel.classList.toggle('left', prefs.side==='left'); placeCam(); }
+  $('sideBtn').onclick = () => { prefs.side = prefs.side==='right' ? 'left' : 'right'; save(LS_PREFS, prefs); applySide(); render(); };
+  async function toggleFullscreen(force){
+    try {
+      if (force===true || (!document.fullscreenElement && force!==false)) await document.documentElement.requestFullscreen();
+      else if (document.fullscreenElement) await document.exitFullscreen();
+    } catch {}
+  }
+  let wakeLock = null;
+  async function keepAwake(){ try { if ('wakeLock' in navigator && !wakeLock) { wakeLock = await navigator.wakeLock.request('screen'); wakeLock.addEventListener('release',()=>wakeLock=null); } } catch {} }
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState==='visible') keepAwake(); });
+
+  function closeStart(){ $('start').classList.add('gone'); keepAwake(); }
+  $('goBtn').onclick = async () => { closeStart(); await toggleFullscreen(true); togglePanel(true); };
+  $('hideBtn').onclick = () => togglePanel(true);
+  $('fsBtn').onclick = () => toggleFullscreen();
+  const toggleHelp = force => $('help').classList.toggle('gone', force===undefined ? undefined : !force);
+  $('helpBtn').onclick = () => toggleHelp(true);
+  $('helpClose').onclick = () => toggleHelp(false);
+  $('help').addEventListener('click', e => { if (e.target.id==='help') toggleHelp(false); });
+  stage.addEventListener('dblclick', () => togglePanel());
+  // кнопки не тримають фокус, щоб пробіл і стрілки завжди керували світлом
+  document.addEventListener('click', e => { const b = e.target.closest('button'); if (b) b.blur(); });
+
+  function nudge(key, delta, min, max, label){
+    stopTween(); state[key] = clamp(Math.round((state[key]+delta)*100)/100, min, max);
+    if (key==='temp') state.useCustom = false;
+    markScene(null); render(); toast(label(state[key]));
+  }
+  addEventListener('keydown', e => {
+    const t = e.target, k = e.key;
+    if (t.tagName==='INPUT' && t.type==='text') return;
+    const onRange = t.tagName==='INPUT' && t.type==='range';
+    if ((e.ctrlKey||e.metaKey) && (k==='z'||k==='Z'||k==='я'||k==='Я')){ e.preventDefault(); undoRedo(e.shiftKey?1:-1); return; }
+    if ((e.ctrlKey||e.metaKey) && (k==='y'||k==='н')){ e.preventDefault(); undoRedo(1); return; }
+    if (e.ctrlKey||e.metaKey||e.altKey) return;
+    if (!$('help').classList.contains('gone') && (k==='Escape'||k==='?')){ toggleHelp(false); return; }
+    if (k==='Escape' && !$('start').classList.contains('gone')){ closeStart(); return; }
+    if (k==='h'||k==='H'||k==='р'||k==='Р'){ togglePanel(); }
+    else if (k==='f'||k==='F'||k==='а'||k==='А'){ toggleFullscreen(); }
+    else if (k==='c'||k==='C'||k==='с'||k==='С'){ toggleCam(); }
+    else if (k==='?'||k===','&&e.shiftKey){ toggleHelp(); }
+    else if (k===' '){ e.preventDefault(); lightOn=!lightOn; render(); toast(lightOn?'Світло увімкнено':'Світло вимкнено'); }
+    else if (onRange && k.startsWith('Arrow')) { /* стрілки рухають сфокусований повзунок */ }
+    else if (k==='ArrowUp'||k==='ArrowDown'){ e.preventDefault(); nudge('bright', k==='ArrowUp'?5:-5, 0, 100, v=>'Яскравість '+v+'%'); }
+    else if (k==='ArrowLeft'||k==='ArrowRight'){ e.preventDefault(); nudge('temp', k==='ArrowRight'?200:-200, 2000, 10000, v=>v+'K'); }
+    else if (k==='['||k===']'||k==='х'||k==='ї'||k==='Х'||k==='Ї'){ nudge('soft', (k===']'||k==='ї'||k==='Ї')?5:-5, 0, 100, v=>'М\'якість '+v+'%'); }
+    else if (k==='-'||k==='='||k==='+'||k==='_'){ nudge('size', (k==='='||k==='+')?5:-5, 10, 100, v=>'Розмір '+v+'%'); }
+    else if (/^[1-9]$/.test(k)){ const sc = allScenes()[+k-1]; if (sc) applyScene(sc); }
+  });
+  stage.addEventListener('wheel', e => {
+    e.preventDefault();
+    const up = e.deltaY < 0 || (e.deltaY===0 && e.deltaX < 0);
+    if (e.ctrlKey||e.metaKey) nudge('size', up?2:-2, 10, 100, v=>'Розмір '+v+'%');
+    else if (e.shiftKey) nudge('soft', up?2:-2, 0, 100, v=>'М\'якість '+v+'%');
+    else if (e.altKey) nudge('temp', up?100:-100, 2000, 10000, v=>v+'K');
+    else nudge('bright', up?2:-2, 0, 100, v=>'Яскравість '+v+'%');
+  }, {passive:false});
+
+  // перетягування джерела мишкою прямо по екрану
+  let drag = null;
+  stage.addEventListener('pointerdown', e => {
+    if (state.mode==='full' || e.button!==0) return;
+    stopTween();
+    drag = {x:e.clientX, y:e.clientY, px:state.px, py:state.py};
+    stage.setPointerCapture(e.pointerId); stage.classList.add('dragging');
+  });
+  stage.addEventListener('pointermove', e => {
+    if (!drag) return;
+    let dx = (e.clientX-drag.x)/innerWidth*100, dy = (e.clientY-drag.y)/innerHeight*100;
+    if (state.mode==='keyfill') dx = dx * 2 * (drag.x < innerWidth/2 ? -1 : 1); // від центру — ширше
+    else if (state.mirror && state.mode!=='split') dx = -dx;
+    state.px = clamp(Math.round(drag.px + dx), 0, 100);
+    state.py = clamp(Math.round(drag.py + dy), 0, 100);
+    markScene(null); render();
+  });
+  const endDrag = () => { drag = null; stage.classList.remove('dragging'); };
+  stage.addEventListener('pointerup', endDrag); stage.addEventListener('pointercancel', endDrag);
+
+  // ховаємо курсор, коли миша не рухається
+  let curT; addEventListener('mousemove', () => { stage.classList.remove('cursor-hidden'); clearTimeout(curT); curT=setTimeout(()=>stage.classList.add('cursor-hidden'),2000); });
+  addEventListener('resize', render);
+
+  applySide(); renderScenes(); draw();
+})();
+</script>
+</body>
+</html>
